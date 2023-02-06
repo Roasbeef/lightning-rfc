@@ -22,7 +22,6 @@ Created: 2022-04-20
       - [Nonce Generation](#nonce-generation)
       - [Nonce Handling](#nonce-handling)
       - [Signing](#signing)
-    + [Nothing Up My Sleeves Points](#nothing-up-my-sleeves-points)
   * [Design Overview](#design-overview)
   * [Specification](#specification)
     + [Feature Bits](#feature-bits)
@@ -126,7 +125,9 @@ It's important to note that while `taproot_output_key` is serialized as a
 (even or odd) of the public key must be remembered.
 
 The `taproot_internal_key` is also a BIP 340 public key, ideally derived anew
-for each output. The `tagged_hash` scheme is described in BIP 340, we briefly
+for each output.
+
+The `tagged_hash` scheme is described in BIP 340, we briefly
 define the function as:
 ```
 tagged_hash(tag, msg) = SHA256(SHA256(tag) || SHA256(tag) || msg)
@@ -141,8 +142,8 @@ A `tap_leaf` is a two tuple of (`leaf_version`, `leaf_script`). A `tap_leaf` is 
 ```
 leaf_version || compact_size_of(leaf_script) || leaf_script
 ```
-where `compact_size_of` is the variable length integer used in the Bitcoin p2p
-protocol.
+where `leaf_version` is `0xc0` (tapscript) and `compact_size_of` is the variable
+length integer used in the Bitcoin p2p protocol.
 
 The digest of a `tap_leaf` is computed as:
 ```
@@ -151,7 +152,7 @@ tagged_hash("TapLeaf", leaf_encoding)
 
 A `tap_branch` can commit to either a `tap_leaf` or `tap_branch`. Before
 hashing, a `tap_branch` sorts the two `tap_node` arguments based on
-lexicographical ordering:
+lexicographical ordering (smallest first):
 ```
 tagged_hash("TapBranch", sort(node_1, node_2))
 ```
@@ -203,7 +204,7 @@ resulting output key has an odd y coordinate (see BIP 341 for details).
 
 A script path spend is executed when a tapscript leaf is revealed. A script
 path spends has three components: a control block, the script leaf being
-revealed, and the valid witness.
+revealed, and the valid witness elements to satisfy the script.
 
 A control block has the following serialization:
 ```
@@ -216,6 +217,9 @@ of the output key, which is checked during control block verification. The
 hashes in the path from the revealed leaf all the way up to the root of the
 tree. In practice if one hashes the revealed leaf, and each 32-byte hash of the
 inclusion proof together, they'll reach the script root if the proof was valid.
+
+Note that the `output_key_y_parity` is only the parity _bit_, not `0x02` or `0x03`.
+`output_key_y_parity | leaf_version` will thus be `0xc0` or `0xc1`.
 
 If only a single leaf is committed to in a tree, then the `inclusion_proof`
 will be absent.
@@ -609,7 +613,7 @@ A new TLV field is added to the `shutdown` message:
 1. `tlv_stream`: `shutdown_tlvs`
 2. types:
     1. type: 8 (`shutdown_nonce`)
-    2: data:
+    2. data:
         * [`66*byte`:`nonces`]
 
 Before a signature can be generated for a co-op close transaction, but sides
@@ -941,10 +945,10 @@ As with base channels, the `nSequence` field must be set to `to_self_delay`.
 
 As we inherit the anchor output semantics we want to ensure that the remote
 party can unilaterally sweep their funds after the 1 block CSV delay. In order
-to achieve this property, we'll re-use the `_funding_key` here: its in
+to achieve this property, we'll re-use the `combined_funding_key` here: its in
 the best interest of the other party to enforce these semantics (mempool
 pinning mitigation), so the remote party will be forced to always take the
-script reveeal path.
+script reveal path.
 
 The to remote output has the following form:
 
@@ -973,13 +977,15 @@ where `to_remote_control_block` is:
 For simple taproot channels (`option_simple_taproot`) we'll maintain the same
 form as base segwit channels, but instead will utilize `local_delayedpubkey`
 and the `remotepubkey` rather than the multi-sig keys as that's no longer
-revealed due to musig2.
+revealed due to musig2. In the case that no `to_local` output exists the
+`local_htlcpubkey` is used and when no `to_remote` output exists the
+`remote_htlcpubkey` is used.
 
 An anchor output has the following form:
 
   * `OP_1 anchor_output_key`
   * where:
-    * `anchor_internal_key = remotepubkey/local_delayedpubkey`
+    * `anchor_internal_key = remotepubkey/remote_htlcpubkey/local_delayedpubkey/local_htlcpubkey`
     * `anchor_output_key = anchor_internal_key + tagged_hash("TapTweak", anchor_internal_key || anchor_script_root)`
     * `anchor_script_root = tapscript_root([anchor_script])`
     * `anchor_script`:
@@ -1063,14 +1069,16 @@ TODO(roasbeef): specify full witnesses?
 #### HTLC Second Level Transactions
 
 For the second level transactions, we retain the existing structure: a 2-of-2
-multi-spend going to a CTV delayed output. Like the normal HTLC transactions,
+multi-spend going to a CSV delayed output. Like the normal HTLC transactions,
 we also place the revocation key as the internal key, allowing easy breach
 sweeps with each party only retaining the specific script root.
 
-An HTLC-Success or HTLC-Timeout is a one-in-one-out transaction signed using
-the `SIGHASH_SINGLE|SIGHASH_ANYONECANPAY` flag. These transactions always have
-_zero_ fees attached, forcing them to be aggregated with each other and a
-change input.
+An HTLC-Success or HTLC-Timeout is a one-in-one-out transaction signed by the
+remote party using the `SIGHASH_SINGLE|SIGHASH_ANYONECANPAY` flag (the local
+party uses `SIGHASH_DEFAULT` as usual to prevent malleability from outside
+observers). These transactions always have _zero_ fees attached, forcing them
+to be aggregated with a wallet input to pay for fees. Multiple HTLC second
+level transactions can be combined together.
 
 ##### HTLC-Success Transactions
 
