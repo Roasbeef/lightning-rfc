@@ -20,8 +20,9 @@ every "SHOULD" is an interop fork, every unstated race is a funds-loss vector.
   citation — sustained coverage a human spec team rarely sustains.
 
 **Artifact.** A real P model of channel splicing now lives in `models/`:
-8 build phases, 17 P tests + 3 Go bridge tests green, 20 catalogued questions,
-10 findings against the live spec text.
+8 build phases (+ a base commitment-FSM follow-up), 21 P tests + 3 Go
+bridge tests green, 20 catalogued questions, 10 findings against the live
+spec text.
 
 *Notes: This is not a proposal. The model in `models/` already exists and is
 the evidence for everything that follows. The pitch is to make this loop
@@ -490,7 +491,259 @@ commitment FSM. They're catalogued as Q19/Q20 in SPEC_QUESTIONS.md.*
 
 ---
 
-## Slide 16: The Bridge — Closing the Loop to Real Implementations
+## Slide 16: Deep Dive — The State Machine Beneath Splicing
+
+F9/F10 were findings *about an abstraction boundary*. So we built the
+layer underneath: `channel.pproj` — the base full-duplex
+`commitment_signed` / `revoke_and_ack` protocol (BOLT 2 §2553–§2571).
+
+- The splice model treated `commit_sig` / `revoke_and_ack` as one paired
+  exchange. The real protocol is **two independent directions** — either
+  peer can have a `commitment_signed` in flight at any time.
+- The next slides show the actual P machine, the invariant that pins down
+  the convergence the spec only asserts, and a concrete **fund-loss
+  counterexample** the model produces on demand.
+
+*Notes: This is the part of the talk that earns the thesis. We didn't
+just model the new feature (splicing) — modeling it forced us to confront
+that the feature rests on a base-layer property the spec never makes
+checkable. So we went down a layer and checked it.*
+
+---
+
+## Slide 17: The Per-Update Lifecycle (§2558–§2566)
+
+An HTLC update is not "added" atomically. It walks a five-stage lifecycle,
+landing on the *remote* commitment first and the *local* one only after a
+`revoke_and_ack`:
+
+```
+1. update_add_htlc      sent   ->  enters peer's "received" set
+2. commitment_signed    sent   ->  peer adopts it (its local commitment)
+3. revoke_and_ack       recv   ->  now on peer's commitment
+4. commitment_signed    recv   ->  we adopt it (our local commitment)
+5. revoke_and_ack       sent   ->  now on our commitment  (both: irrevocable)
+```
+
+Only after stage 5 is the update **irrevocably committed** (§2570) — the
+single predicate that matters for safety.
+
+*Notes: The asymmetry is the whole point. An update is real on one side
+before the other. Every bug in this region is a node acting on an update
+that is not yet irrevocable on both sides.*
+
+---
+
+## Slide 18: Modeling One Peer — `ChannelPeer`
+
+```p
+machine ChannelPeer {
+  var ownProposed:    set[tUpdateId]; // I sent update_add; pending on peer
+  var theirReceived:  set[tUpdateId]; // peer's update_add I received
+  var remoteSigned:   set[tUpdateId]; // I signed into peer's commitment
+  var localCommitted: set[tUpdateId]; // peer signed into MY commitment
+  var peerAcked:      set[tUpdateId]; // peer revoked-old: on peer's commitment
+  ...
+}
+```
+
+`localCommitted ∩ peerAcked` is the irrevocably-committed set in this
+peer's view (§2570). Each set advances on exactly one wire event — the
+lifecycle of Slide 17, made explicit.
+
+*Notes: Six sets, five transitions. Compare this to the splice model's
+two booleans (`sentCommitSig` / `receivedCommitSig`) — that compression is
+exactly what F9 says hides the convergence question.*
+
+---
+
+## Slide 19: Concurrent `commit_sig` — The Hard Case (§2568)
+
+```mermaid
+sequenceDiagram
+  participant A
+  participant B
+  A->>B: update_add(1)
+  B->>A: update_add(2)
+  Note over A,B: both sign concurrently — two commit_sig in flight
+  A->>B: commitment_signed{covers 1,2}
+  B->>A: commitment_signed{covers 1,2}
+  B->>A: revoke_and_ack
+  A->>B: revoke_and_ack
+  Note over A,B: do they converge to the same {1,2}? §2569: "not concerning"
+```
+
+§2569: "the two commitment transactions may be out of sync indefinitely
+... this is not concerning." That is an *assertion*, not a theorem.
+`tcConcurrentCommitSig` makes the checker prove it across every
+interleaving.
+
+*Notes: "Not concerning" is the most dangerous phrase in a spec. It means
+"we believe this converges but never wrote down why." The checker either
+agrees or hands you the schedule where it doesn't.*
+
+---
+
+## Slide 20: The Liveness the Spec Omits
+
+The convergence check *failed first* — and the counterexample was
+instructive. A node that sends `commitment_signed` once, when it has no
+unsigned changes (empty cover), and never retries, strands the peer's
+update forever.
+
+```p
+fun flushCommit() {
+  // §3106: MUST NOT send commit_sig with no updates (empty cover => no-op).
+  // Idempotent: once everything known is signed, this is a no-op => it
+  // terminates rather than looping.
+  ... compute cover of un-signed updates ...
+  if (sizeof(cover) == 0) { return; }
+  send peerRef, eRecvCommitSig, (covered = cover,);
+}
+```
+
+Convergence holds **iff** a node with pending changes *eventually* sends
+`commitment_signed`. BOLT 2 says when you MAY / MUST NOT (§3106) — never
+that you MUST eventually. **The omitted liveness obligation is the finding.**
+
+*Notes: This is the subtle win. The model didn't just confirm the spec —
+it found the unstated assumption the spec's "not concerning" silently
+leans on, and named it as a normative gap.*
+
+---
+
+## Slide 21: The Convergence Invariant, Made Checkable
+
+```p
+spec Spec_CommitmentConvergence observes eUpdateProposed, eIrrevocable {
+  start cold state Converged { ... }
+  hot   state Diverging  { ... }   // MUST eventually leave this state
+  fun decide() {
+    if (covers(irrevA, proposed) && covers(irrevB, proposed)) {
+      goto Converged;              // both peers hold every proposed update
+    } else { goto Diverging; }
+  }
+}
+```
+
+A P **liveness** monitor: `Diverging` is `hot` — a run that stays there
+forever is a bug. This is the precise, machine-checkable form of §2569's
+prose. Result: green at 3000 schedules, all interleavings.
+
+*Notes: Two states. `hot` = "not yet converged"; the checker proves we
+always leave it. This three-line monitor is the theorem the spec never
+stated.*
+
+---
+
+## Slide 22: The Irrevocably-Committed Predicate (§2570)
+
+```p
+fun checkIrrevocable() {
+  foreach (u in localCommitted) {
+    if ((u in peerAcked) && !(u in announcedIrrevocable)) {
+      announcedIrrevocable += (u);
+      announce eIrrevocable, (peer = pid, id = u);  // safe to act on now
+    }
+  }
+}
+```
+
+An update is irrevocable **only** when it is on my commitment
+(`localCommitted`) *and* the peer has revoked-old for it (`peerAcked`).
+This is the gate every safety decision must pass — and the next slide is
+what happens when a node skips it.
+
+*Notes: One line — `(u in localCommitted) && (u in peerAcked)` — is the
+load-bearing safety predicate of the entire protocol. Everything else is
+plumbing to compute these two sets correctly.*
+
+---
+
+## Slide 23: The Fund-Loss Counterexample — `tcForwardTooEarly`
+
+A routing node that forwards an incoming HTLC before its *outgoing*
+update is irrevocable has **paid downstream but cannot claim upstream**
+(§3173–§3176). We model the unsafe node explicitly:
+
+```p
+on eUserForward do (e: (id: tUpdateId, eager: bool)) {
+  if (e.eager) {                          // UNSAFE node: forward NOW
+    announce eForwardAttempt,
+      (peer = pid, id = e.id,
+       isIrrevocable = (e.id in localCommitted) && (e.id in peerAcked));
+  } else { pendingForwards += (e.id); tryForward(); }  // CONFORMANT: wait
+}
+```
+
+`Spec_ForwardOnlyIrrevocable` asserts every forward is irrevocable.
+`tcForwardTooEarly` (eager=true) **must** find the violation — it is a
+checked-in negative test, the fund-loss demonstration on demand.
+
+*Notes: This is the slide that lands with a Bitcoin audience. It's not a
+hypothetical — it's the exact "forwarded before irrevocably committed"
+fund-loss class, reduced to a one-command reproducer the checker fires.*
+
+---
+
+## Slide 24: Conformant vs. Unsafe, Side by Side
+
+| Test               | Node behavior              | Monitor result        |
+|--------------------|----------------------------|-----------------------|
+| `tcForwardSafe`    | holds forward until irrev. | green (no violation)  |
+| `tcForwardTooEarly`| forwards eagerly (unsafe)  | **bug** (must fire)   |
+
+The model encodes *both* a conformant and a non-conformant node, and the
+suite asserts the monitor distinguishes them. A spec that only describes
+the conformant path can't tell you the cost of the other one; the model
+makes the cost a failing test.
+
+*Notes: The negative test is as important as the positive one. It proves
+the monitor has teeth — that `Spec_ForwardOnlyIrrevocable` would actually
+catch a real implementation that got this wrong.*
+
+---
+
+## Slide 25: F10 — Carrying Convergence Across a Reconnect
+
+F9 is steady-state convergence. F10 is the *same property across a
+disconnect* — historically the most bug-prone region (§3489–§3554):
+
+- `next_commitment_number` / `next_revocation_number` crossing decides
+  who retransmits what.
+- Retransmit `revoke_and_ack` and `commitment_signed` "in the same
+  relative order as initially transmitted" (§3495–§3496).
+- The asymmetric `next_revocation_number ± 1` reasoning (§3498–§3503).
+
+The spec states this imperatively (do X if counter Y holds), never as a
+post-condition. Next modeling target: extend `ChannelPeer` with reconnect
+and a monitor asserting *both counters agree and no irrevocable update is
+lost or duplicated* after reestablish.
+
+*Notes: This is the honest "what's next." The hard part isn't writing the
+machine — it's that the spec gives no convergence post-condition to check
+against, so step one is writing down the theorem.*
+
+---
+
+## Slide 26: What the Channel Model Buys Us
+
+- **Convergence is now machine-checked**, not asserted — across all
+  concurrent-`commit_sig` interleavings (§2569 made into a theorem).
+- **The omitted liveness obligation is named** — a node MUST eventually
+  flush pending changes, or convergence fails (F9).
+- **A fund-loss vector is a one-command reproducer** — `tcForwardTooEarly`
+  (§3173–§3176).
+- **The abstraction boundary itself became a finding** — modeling splicing
+  forced the base layer into scope.
+
+*Notes: The meta-point: a good model doesn't stop at the feature you set
+out to verify. It tells you which of your foundations were only ever
+assumed.*
+
+---
+
+## Slide 27: The Bridge — Closing the Loop to Real Implementations
 
 The model is only useful if real clients can be tested against it. Phase 7 ships
 a Go replay harness (`models/bridge/`):
@@ -523,7 +776,7 @@ a derived product of the spec model, not a separate hand-maintained corpus.*
 
 ---
 
-## Slide 17: Results
+## Slide 28: Results
 
 | Phase | Spec area                          | P tests | Max schedules | Result |
 |-------|------------------------------------|---------|---------------|--------|
@@ -534,14 +787,17 @@ a derived product of the spec model, not a separate hand-maintained corpus.*
 | 5     | Blockchain non-determinism (reorg) | 1       | 2000          | green  |
 | 6     | Channel close + gossip post-splice | 1       | 2000          | green  |
 | 7     | Bridge (Go replay harness)         | 3 (Go)  | n/a           | green  |
+| 9     | Base commitment FSM (F9 follow-up) | 4 + 1*  | 3000          | green  |
 
-- **17 P tests + 3 Go bridge tests, all green.**
-- **~88 distinct timelines** explored in the deepest scenario,
+- **21 P tests + 3 Go bridge tests, all green** (* + one checked-in
+  *counterexample* test, `tcForwardTooEarly`, which MUST fire).
+- **~88 distinct timelines** explored in the deepest splice scenario,
   `tcDisconnectMidSplice` (3000 schedules, max 5000 steps).
 - **20 catalogued questions** (Q1–Q20 in `SPEC_QUESTIONS.md`).
 - **10 findings** (F1–F10 in `FINDINGS.md`), each with clause + fix.
   F1–F8 are splice-specific; F9–F10 reach down into the base commitment
-  protocol the splice flow assumes (convergence + reconnect ordering).
+  protocol — F9's convergence is now machine-checked (`channel.pproj`),
+  F10's reconnect crossing is the next target.
 
 *Notes: The phase discipline matters: each phase adds machines/monitors and
 never breaks a prior phase's checks. F3 surfaced at exactly 615 schedules of
@@ -550,7 +806,7 @@ never breaks a prior phase's checks. F3 surfaced at exactly 615 schedules of
 
 ---
 
-## Slide 18: Limitations (Stated Honestly)
+## Slide 29: Limitations (Stated Honestly)
 
 The model is a **companion to the spec, not a replacement.** It deliberately
 abstracts:
@@ -576,7 +832,7 @@ commitment layer the splice model assumes is itself only prose-specified.*
 
 ---
 
-## Slide 19: Vision — The Spec Model as a CI Gate
+## Slide 30: Vision — The Spec Model as a CI Gate
 
 Make the loop standard practice:
 
@@ -599,7 +855,7 @@ all in one repo, all gated in CI.*
 
 ---
 
-## Slide 20: Call to Action
+## Slide 31: Call to Action
 
 - **Read the artifact.** `models/FINDINGS.md` (F1–F10) and `models/SPEC_QUESTIONS.md`
   (Q1–Q20) are ready for review today.
