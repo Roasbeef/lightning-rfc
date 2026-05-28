@@ -1,0 +1,10 @@
+<Project>
+  <ProjectName>Channel</ProjectName>
+  <InputFiles>
+    <PFile>./src/types.p</PFile>
+    <PFile>./src/channel_commit.p</PFile>
+    <PFile>./src/channel_monitors.p</PFile>
+    <PFile>./test/channel_test.p</PFile>
+  </InputFiles>
+  <OutputDir>./PGeneratedChannel</OutputDir>
+</Project>

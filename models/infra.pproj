@@ -3,5 +3,5 @@
   <InputFiles>
     <PFile>./src/types.p</PFile>
   </InputFiles>
-  <OutputDir>./PGenerated</OutputDir>
+  <OutputDir>./PGeneratedInfra</OutputDir>
 </Project>

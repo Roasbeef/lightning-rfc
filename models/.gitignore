@@ -6,3 +6,5 @@ PCheckerOutput/
 
 # Local checker bin caches.
 .coyote/
+PGeneratedChannel/
+PGeneratedInfra/

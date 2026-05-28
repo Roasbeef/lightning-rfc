@@ -191,8 +191,11 @@ The model does not exercise this; it's flagged for future work.
 
 ## F9. Full-duplex commitment convergence is asserted, not specified
 
-**Status:** Open + not yet modeled. **Spec citation:** BOLT 2
+**Status:** Modeled — convergence holds under an explicit liveness
+assumption the spec does not state. **Spec citation:** BOLT 2
 §2553–§2571 ("Normal Operation"). **Question:** Q19.
+**Model:** `src/channel_commit.p`, `src/channel_monitors.p`,
+`test/channel_test.p` (project `channel.pproj`).
 
 The splice model sits *on top of* the base commitment protocol but
 abstracts it: `commit_sig` / `revoke_and_ack` are modeled as a simple
@@ -228,11 +231,59 @@ checked under concurrent bidirectional `commit_sig`, with a
 `Spec_CommitmentConvergence` monitor asserting both peers reach the same
 irrevocably-committed set.
 
-**Suggested clarification.** State the convergence guarantee normatively:
-"For any interleaving of concurrent `commitment_signed` /
-`revoke_and_ack` in both directions, both nodes converge to the same set
-of irrevocably-committed updates." Back it with a test vector that
-exercises a both-sides-`commit_sig`-crossing schedule.
+**What the model now shows.** `channel_commit.p` models the per-update
+lifecycle explicitly (`ownProposed → remoteSigned → localCommitted →
+peerAcked → irrevocable`), and `Spec_CommitmentConvergence` is a P
+*liveness* monitor: it is `hot` whenever some proposed update is not yet
+irrevocable on **both** peers, and must reach the `cold` Converged state.
+`tcConcurrentCommitSig` adds an update from each side and fires
+`commitment_signed` from both directions concurrently; the checker
+explores every interleaving. Result at 2000 schedules: **convergence
+holds** — but only after making one assumption explicit.
+
+**The assumption the spec omits.** Convergence is *not* unconditional. A
+node that sends `commitment_signed` once, at a moment when it has no
+un-signed changes (empty cover), and then never retries, leaves a peer's
+update un-committed forever — the liveness monitor caught exactly this
+stall before the model was given an explicit flush rule. Convergence
+holds iff **a node with un-committed changes eventually sends
+`commitment_signed`**. BOLT 2 specifies when a node MAY / MUST NOT send
+`commitment_signed` (§3106) but never states that it MUST *eventually*
+send one when changes are pending. The "not concerning" assertion of
+§2569 silently depends on this unstated liveness obligation.
+
+**Safety corollary — forwarding before irrevocable commitment loses
+funds.** The convergence property is the *liveness* half; the
+"irrevocably committed" predicate also has a *safety* half. A routing
+node that forwards (pays) an incoming HTLC's outgoing leg before that
+outgoing update is irrevocably committed has paid downstream while the
+upstream side can still legally drop the HTLC — a direct fund-loss
+vector (the §3173–3176 rationale: "once `commitment_signed` is sent, the
+sender considers itself bound ... and cannot fail the related incoming
+HTLCs until the output HTLCs are fully resolved"). The model captures
+this as `Spec_ForwardOnlyIrrevocable`: any `eForwardAttempt` whose update
+is not irrevocably committed is an assertion failure. The conformant
+node (`eUserForward` with `eager=false`) holds the forward until the
+update is irrevocable and passes; the unsafe node (`eager=true`,
+`tcForwardTooEarly`) forwards immediately and the monitor **catches the
+violation** (`isIrrevocable=False`). The spec states this only as
+rationale prose, not as a normative MUST.
+
+**Suggested clarification (three parts).**
+1. *Safety / convergence:* "For any interleaving of concurrent
+   `commitment_signed` / `revoke_and_ack` in both directions, both nodes
+   converge to the same set of irrevocably-committed updates."
+2. *Liveness (the missing piece):* "A node that has updates not yet
+   irrevocably committed on the remote commitment MUST eventually send
+   `commitment_signed` covering them." Without (2), (1) is unprovable —
+   the model needs it to discharge the liveness monitor.
+3. *Forward safety (normative, not just rationale):* "A node MUST NOT
+   act on (forward / fulfill downstream) an update until it is
+   irrevocably committed in both commitments."
+
+Back all three with the `tcConcurrentCommitSig` both-sides-crossing
+schedule and the `tcForwardTooEarly` counterexample as conformance
+vectors.
 
 ---
 
@@ -282,9 +333,15 @@ existing `Channel` + `Network` machines).
 | 5     | Blockchain non-determinism         | 1          | 2000          | green  |
 | 6     | Close + gossip                     | 1          | 2000          | green  |
 | 7     | Bridge (Go replay harness)         | 3          | n/a           | green  |
+| 9     | Base commitment FSM (F9 follow-up) | 4          | 2000          | green  |
 
-Total: 17 P tests + 3 Go tests, all green. ~88 timelines explored in
-the deepest scenario (disconnect-mid-splice).
+Total: 21 P tests + 3 Go tests, all green. ~88 timelines explored in
+the deepest splice scenario (disconnect-mid-splice). The base commitment
+FSM (`channel.pproj`) adds the F9 follow-up: `Spec_CommitmentConvergence`
+(liveness), `Spec_NoPhantomCommit`, and `Spec_ForwardOnlyIrrevocable`,
+with `tcConcurrentCommitSig` exercising concurrent bidirectional
+`commitment_signed`. It confirms convergence holds — conditional on the
+unstated liveness obligation documented in F9.
 
 ## Known scope gaps / next modeling targets
 
