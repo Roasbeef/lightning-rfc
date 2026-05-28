@@ -67,6 +67,24 @@ Current passing depths (as of latest run):
 | tcDivergentConfirmation         | 2000      | 5000      | 15        |
 | tcSpliceThenShutdown            | 2000      | 5000      | 16        |
 
+Base commitment FSM (`channel.pproj`, the F9/F10 follow-up):
+
+| Test                            | Schedules | Max steps | Note                       |
+|---------------------------------|-----------|-----------|----------------------------|
+| tcOneDirectional                | 3000      | 3000      | single-update full cycle   |
+| tcConcurrentCommitSig           | 3000      | 3000      | concurrent both-side commit|
+| tcSecondRound                   | 3000      | 3000      | pipelined second round     |
+| tcForwardSafe                   | 3000      | 3000      | conformant forward (green) |
+| tcForwardTooEarly               | 500       | 2000      | NEGATIVE — must find a bug  |
+
+`tcForwardTooEarly` is a counterexample test: it MUST report a bug
+(`Spec_ForwardOnlyIrrevocable` firing), demonstrating the §3173–3176
+fund-loss vector. It is excluded from the green suite; `scripts/check.sh`
+asserts it fires.
+
+Run the whole thing with `./scripts/check.sh` (env `SCHEDULES` /
+`MAX_STEPS` override the defaults).
+
 ## How counterexamples become findings
 
 1. Checker reports a violation on monitor `Spec_X`.

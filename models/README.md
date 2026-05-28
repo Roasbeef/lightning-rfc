@@ -30,6 +30,8 @@ models/
 
   splicing.pproj        protocol-level model: quiescence + interactive-tx +
                         splice + channel
+  channel.pproj         base full-duplex commitment FSM (the F9/F10
+                        follow-up: the layer the splice model abstracts)
   infra.pproj           network + blockchain non-determinism, checkable alone
 
   src/                  machine sources (.p)
@@ -57,6 +59,7 @@ models/
 | 6     | Channel-close + gossip post-splice                        |
 | 7     | Bridge skeleton: trace format + Go replay harness         |
 | 8     | Iterate, tighten claims, file findings                    |
+| 9     | Base commitment FSM: F9 convergence + F10 reconnect (WIP)  |
 
 Each phase adds machines and/or spec monitors and never breaks the previous
 phase's checks.
