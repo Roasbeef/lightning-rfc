@@ -330,3 +330,50 @@ The non-RBF rule under zeroconf is documented at `02:1956–1959` but the
 recovery path is not.
 
 **Why it matters:** Funds-loss vector — likely an open issue worth a finding.
+
+---
+
+## Q19. Concurrent `commit_sig` convergence in the full-duplex base protocol
+
+**Citation:** `02-peer-protocol.md:2553–2571` ("Normal Operation").
+
+**Found during:** the channel-state-machine review prompted after the splice
+model was built (the splice model abstracts this base layer).
+
+Lightning's commitment protocol is full-duplex: each direction's
+`commitment_signed` / `revoke_and_ack` is independent, so both peers may have a
+`commitment_signed` in flight at once and their commitment transactions "may be
+out of sync indefinitely" (§2568). The spec calls this "not concerning" because
+"what matters is whether both sides have irrevocably committed" (§2570) — but it
+states **no checkable convergence theorem**: there is no normative claim (and no
+test vector) that *every* interleaving of concurrent bidirectional `commit_sig`
+converges to a single consistent irrevocably-committed set, and no invariant an
+implementation can be tested against.
+
+**Why it matters:** This is the load-bearing foundation the splice protocol
+assumes ("payments must be valid for all active commitments"). The splice model
+abstracts `commit_sig`/`revoke_and_ack` to a paired exchange and does not
+exercise the concurrent crossing. Promoted to **F9**; the next modeling target
+is a real `Channel` machine with the 5-state update lifecycle and a
+`Spec_CommitmentConvergence` monitor.
+
+---
+
+## Q20. Reconnect commitment-number crossing under concurrent in-flight updates
+
+**Citation:** `02-peer-protocol.md:3489–3503`, `02:3493–3496` (retransmit
+`revoke_and_ack` and `commitment_signed` "in the same relative order"),
+`02:3545–3554`.
+
+The reestablish logic resynchronizes via `next_commitment_number` /
+`next_revocation_number`, including an asymmetric ±1 reasoning and an ordering
+constraint on retransmitted `revoke_and_ack` vs `commitment_signed`. When both
+sides have an in-flight `commitment_signed` (Q19) and then disconnect, correct
+convergence depends on all of this — but the spec describes it imperatively
+("do X if counter Y holds") with no stated post-condition that the exchange
+actually re-converges both peers without losing or duplicating an
+irrevocably-committed update.
+
+**Why it matters:** Historically the most bug-prone region across
+implementations. Phase 4 modeled only the splice-specific `next_funding` marker,
+not this base-layer crossing. Promoted to **F10**.

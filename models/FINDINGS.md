@@ -189,6 +189,88 @@ The model does not exercise this; it's flagged for future work.
 
 ---
 
+## F9. Full-duplex commitment convergence is asserted, not specified
+
+**Status:** Open + not yet modeled. **Spec citation:** BOLT 2
+§2553–§2571 ("Normal Operation"). **Question:** Q19.
+
+The splice model sits *on top of* the base commitment protocol but
+abstracts it: `commit_sig` / `revoke_and_ack` are modeled as a simple
+paired exchange (`SpliceCoordinator` states `AwaitingPeerCommitSig` →
+`AwaitingTxSigs`), with `sentCommitSig` / `receivedCommitSig` booleans.
+The model does **not** capture the actual base-layer state machine that
+makes Lightning full-duplex:
+
+- The 5-state per-update lifecycle (§2558–§2566): an update applies to
+  the *other* node's commitment first, and only lands on the sender's
+  own commitment once acknowledged by `revoke_and_ack`.
+- The "irrevocably committed" predicate — the only state that matters
+  for safety (§2570–§2571).
+- **Concurrent `commit_sig` from both sides.** Because each direction's
+  `commitment_signed` / `revoke_and_ack` is independent, both peers can
+  have a `commitment_signed` in flight simultaneously and their
+  commitment transactions "may be out of sync indefinitely" (§2568).
+
+**The spec asserts convergence without a checkable invariant.** §2569
+says the indefinite-out-of-sync condition "is not concerning" — but
+there is no stated theorem (and no test vector) that *concurrent*
+`commit_sig` crossing from both sides always converges to a single
+consistent irrevocably-committed set. This is precisely the class of
+property a checker should pin down, and it is the load-bearing
+foundation the splice protocol assumes.
+
+**Why it matters.** Splicing's "payments must be valid for all active
+commitments" rule (`splicing-test.md:24,49`) is only sound if the base
+full-duplex commitment machine converges. The splice model assumes that
+foundation rather than proving it. This is the **highest-value next
+modeling target**: a `Channel` machine with the real update lifecycle,
+checked under concurrent bidirectional `commit_sig`, with a
+`Spec_CommitmentConvergence` monitor asserting both peers reach the same
+irrevocably-committed set.
+
+**Suggested clarification.** State the convergence guarantee normatively:
+"For any interleaving of concurrent `commitment_signed` /
+`revoke_and_ack` in both directions, both nodes converge to the same set
+of irrevocably-committed updates." Back it with a test vector that
+exercises a both-sides-`commit_sig`-crossing schedule.
+
+---
+
+## F10. Reconnect retransmit ordering under concurrent in-flight updates
+
+**Status:** Open + partially modeled. **Spec citation:** BOLT 2
+§3489–§3503 (`channel_reestablish` `next_commitment_number` /
+`next_revocation_number` reasoning), §3493–§3496 (the "retransmit
+`revoke_and_ack` and `commitment_signed` in the same relative order"
+rule), §3545–§3554. **Question:** Q20.
+
+Phase 4 modeled reconnection using only the splice-specific
+`next_funding` marker; it did **not** model the base-layer
+`next_commitment_number` / `next_revocation_number` crossing that drives
+convergence after a disconnect. When *both* sides have an in-flight
+`commitment_signed` (the F9 concurrent case) and then disconnect, the
+correct resynchronization depends on:
+
+- which side owes a `revoke_and_ack` vs a `commitment_signed`,
+- replaying them "in the same relative order as initially transmitted"
+  (§3495–§3496), and
+- the asymmetric `next_revocation_number` ±1 reasoning (§3498–§3503).
+
+This is historically the single most bug-prone region of the protocol
+across implementations, and the spec describes it imperatively (do X
+if counter Y holds) rather than as a convergence property. The model's
+simplified reestablish cannot distinguish a conformant peer from one
+that retransmits in the wrong order.
+
+**Suggested clarification.** Pair the imperative reestablish rules with a
+stated post-condition: "after the reestablish exchange completes, both
+peers' next-commitment / next-revocation counters agree and no
+irrevocably-committed update is lost or duplicated." Then model it and
+emit conformance vectors (this is the natural Phase 8/9 extension of the
+existing `Channel` + `Network` machines).
+
+---
+
 ## Coverage summary
 
 | Phase | Spec area                          | Test count | Max schedules | Result |
@@ -203,3 +285,25 @@ The model does not exercise this; it's flagged for future work.
 
 Total: 17 P tests + 3 Go tests, all green. ~88 timelines explored in
 the deepest scenario (disconnect-mid-splice).
+
+## Known scope gaps / next modeling targets
+
+The model is deliberately scoped to the *splice-specific* glue. It sits
+on top of, and abstracts, several base-layer mechanisms. These are
+ordered by value:
+
+1. **Full-duplex commitment convergence (F9).** The base
+   `commitment_signed` / `revoke_and_ack` machine with the real per-update
+   lifecycle and concurrent bidirectional `commit_sig`. Highest value:
+   it is the foundation every other property assumes.
+2. **Reconnect commitment-number crossing (F10).** The
+   `next_commitment_number` / `next_revocation_number` resynchronization,
+   especially under concurrent in-flight updates from both sides.
+3. **HTLC validity across active commitments.** The model tracks the set
+   of active commitments but abstracts HTLCs themselves; the
+   "payments must be valid for all active commitments" rule
+   (`splicing-test.md:24`) is asserted structurally, not exercised with
+   real HTLC adds/settles/fails spanning the set.
+4. **Zeroconf splice double-spend (F8).** Catalogued, not exercised.
+5. **Taproot per-splice nonce coordination.**
+   `bolt-simple-taproot.md:1135–1172` is surveyed, not machine-checked.
