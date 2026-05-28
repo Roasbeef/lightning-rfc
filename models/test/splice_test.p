@@ -516,3 +516,20 @@ test tcSpliceThenShutdown [main=TestSpliceThenShutdown]:
          Spec_GossipOrdering, Spec_ShutdownSpliceExclusion in
   (union { TestSpliceThenShutdown },
    { QuiescencePeer, SpliceCoordinator, Blockchain });
+
+// ---------------------------------------------------------------------------
+// Trace-generation test cases. These reuse the existing test-driver machines
+// but attach the TraceObserver instead of the safety monitors. Run with
+// `--schedules 1 --verbose` and scrape `<PrintLog> PTRACE|...` lines to
+// produce the canonical JSON traces (see scripts/generate.sh).
+// ---------------------------------------------------------------------------
+
+test tcGenSpliceInHappy [main=TestSpliceInHappy]:
+  assert TraceObserver in
+  (union { TestSpliceInHappy },
+   { QuiescencePeer, SpliceCoordinator, Blockchain });
+
+test tcGenDisconnectMidSplice [main=TestDisconnectMidSplice]:
+  assert TraceObserver in
+  (union { TestDisconnectMidSplice },
+   { QuiescencePeer, SpliceCoordinator, Blockchain });

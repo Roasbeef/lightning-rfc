@@ -237,12 +237,16 @@ machine SpliceCoordinator {
         send peerCoord, eRecvSpliceInit,
           (channel_id = 0, contribution = myContribution,
            feerate_perkw = attemptFeerate, locktime = 0);
+        emitTrace("splice_init", 0, myContribution, attemptFeerate,
+          "AwaitingSpliceAck");
         goto AwaitingNegotiationAck;
       } else {
         // NegRbf: send tx_init_rbf.
         send peerCoord, eRecvTxInitRbf,
           (channel_id = 0, feerate_perkw = attemptFeerate,
            funding_output_contribution = myContribution);
+        emitTrace("tx_init_rbf", 0, myContribution, attemptFeerate,
+          "AwaitingTxAckRbf");
         goto AwaitingNegotiationAck;
       }
     }
@@ -332,6 +336,7 @@ machine SpliceCoordinator {
       send peerCoord, eRecvCommitSig,
         (channel_id = 0, funding_txid = attemptTxid, commitment_number = 0);
       sentCommitSig = true;
+      emitTrace("commit_sig", attemptTxid, 0, 0, "AwaitingPeerCommitSig");
       goto AwaitingPeerCommitSig;
     }
   }
@@ -357,6 +362,7 @@ machine SpliceCoordinator {
       send peerCoord, eRecvCommitSig,
         (channel_id = 0, funding_txid = attemptTxid, commitment_number = 0);
       sentCommitSig = true;
+      emitTrace("commit_sig", attemptTxid, 0, 0, "AwaitingPeerCommitSig");
       goto AwaitingPeerCommitSig;
     }
   }
@@ -438,6 +444,7 @@ machine SpliceCoordinator {
         send peerCoord, eRecvSpliceLocked,
           (channel_id = 0, splice_txid = e.txid);
         attemptTxid = e.txid;  // remember which one we locked
+        emitTrace("splice_locked", e.txid, 0, 0, "AwaitingPeerSpliceLocked");
         goto AwaitingPeerSpliceLocked;
       }
     }
@@ -496,6 +503,7 @@ machine SpliceCoordinator {
         completeSpliceLock();
         send peerCoord, eRecvSpliceLocked,
           (channel_id = 0, splice_txid = attemptTxid);
+        emitTrace("splice_locked", attemptTxid, 0, 0, "Operating");
         goto Operating;
       }
     }
@@ -560,6 +568,7 @@ machine SpliceCoordinator {
     on eUserReconnect do {
       // BOLT 2 §3431: send channel_reestablish on reconnection.
       send peerCoord, eRecvChannelReestablish, buildReestablishTlvs();
+      emitTrace("channel_reestablish", attemptTxid, 0, 0, "Reconnecting");
       goto Reconnecting;
     }
   }
@@ -605,9 +614,11 @@ machine SpliceCoordinator {
     attemptFeerate = feerate;
     if (negotiation == NegSplice) {
       send peerCoord, eRecvSpliceAck, (channel_id = 0, contribution = 0);
+      emitTrace("splice_ack", 0, 0, 0, "InItx");
     } else {
       send peerCoord, eRecvTxAckRbf,
         (channel_id = 0, funding_output_contribution = 0);
+      emitTrace("tx_ack_rbf", 0, 0, 0, "InItx");
     }
     attemptTxid = nextSpliceTxid;
     nextSpliceTxid = nextSpliceTxid + 1;
@@ -627,10 +638,15 @@ machine SpliceCoordinator {
 
   fun sendOurTxSignatures() {
     var hasShared: bool;
+    var sharedBit: int;
     hasShared = (role == RoleInitiator);
+    sharedBit = 0;
+    if (hasShared) { sharedBit = 1; }
     send peerCoord, eRecvTxSignatures,
       (channel_id = 0, txid = attemptTxid, has_shared_input_sig = hasShared);
     sentTxSigs = true;
+    // amount carries has_shared_input_signature (0/1) for the extractor.
+    emitTrace("tx_signatures", attemptTxid, sharedBit, 0, "AwaitingConfirmation");
   }
 
   fun announceConstructed() {
@@ -656,9 +672,19 @@ machine SpliceCoordinator {
     );
   }
 
+  // Trace-generation helper. Announces eWireTrace so the TraceObserver can
+  // emit a marker line during `p check --schedules 1 --verbose`.
+  fun emitTrace(msg: string, txid: tTxid, amount: int, feerate: int, postState: string) {
+    announce eWireTrace, (
+      peer = pid, sub = SpSplice, msg = msg,
+      txid = txid, amount = amount, feerate = feerate, postState = postState
+    );
+  }
+
   // Phase 4 helpers.
 
   fun onDisconnect(m: tReconnectMarker) {
+    emitTrace("user_disconnect", 0, 0, 0, "Disconnected");
     lastActive = m;
     send quiescence, eDisconnect;
     goto Disconnected;

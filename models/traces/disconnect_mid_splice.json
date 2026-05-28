@@ -1,122 +1,173 @@
 {
   "scenario": "disconnect_mid_splice",
-  "spec_citations": [
-    "bolt02/splicing-test.md:377",
-    "02-peer-protocol.md:3360-3543"
-  ],
   "events": [
     {
       "index": 1,
       "peer": "A",
-      "sub_protocol": "test",
-      "msg_type": "user_initiate_splice",
-      "fields": {"contribution": 100000},
-      "expected_post_state": {"quiescence_state": "Quiescing"}
+      "sub_protocol": "quiescence",
+      "msg_type": "stfu",
+      "fields": {
+        "channel_id": "1",
+        "initiator": 1
+      },
+      "expected_post_state": {
+        "quiescence_state": "Quiescing"
+      }
     },
     {
       "index": 2,
       "peer": "B",
       "sub_protocol": "quiescence",
       "msg_type": "stfu",
-      "fields": {"channel_id": "1", "initiator": 0},
-      "expected_post_state": {"quiescence_state": "Quiescent"}
+      "fields": {
+        "channel_id": "1",
+        "initiator": 0
+      },
+      "expected_post_state": {
+        "quiescence_state": "Quiescent"
+      }
     },
     {
       "index": 3,
       "peer": "A",
       "sub_protocol": "splice",
       "msg_type": "splice_init",
-      "fields": {"channel_id": "1", "funding_contribution_satoshis": 100000, "funding_feerate_perkw": 253, "locktime": 0},
-      "expected_post_state": {}
+      "fields": {
+        "channel_id": "1",
+        "funding_contribution_satoshis": 100000,
+        "funding_feerate_perkw": 253,
+        "locktime": 0
+      },
+      "expected_post_state": {
+        "splice_state": "AwaitingSpliceAck"
+      }
     },
     {
       "index": 4,
       "peer": "B",
       "sub_protocol": "splice",
       "msg_type": "splice_ack",
-      "fields": {"channel_id": "1", "funding_contribution_satoshis": 0},
-      "expected_post_state": {}
+      "fields": {
+        "channel_id": "1",
+        "funding_contribution_satoshis": 0
+      },
+      "expected_post_state": {
+        "splice_state": "InItx"
+      }
     },
     {
       "index": 5,
-      "peer": "A",
+      "peer": "B",
       "sub_protocol": "splice",
       "msg_type": "commit_sig",
-      "fields": {"channel_id": "1", "funding_txid": "2", "commitment_number": 0},
-      "expected_post_state": {}
+      "fields": {
+        "channel_id": "1",
+        "commitment_number": 0,
+        "funding_txid": "2"
+      },
+      "expected_post_state": {
+        "splice_state": "AwaitingPeerCommitSig"
+      }
     },
     {
       "index": 6,
-      "peer": "B",
+      "peer": "A",
       "sub_protocol": "splice",
       "msg_type": "commit_sig",
-      "fields": {"channel_id": "1", "funding_txid": "2", "commitment_number": 0},
-      "expected_post_state": {}
+      "fields": {
+        "channel_id": "1",
+        "commitment_number": 0,
+        "funding_txid": "2"
+      },
+      "expected_post_state": {
+        "splice_state": "AwaitingPeerCommitSig"
+      }
     },
     {
       "index": 7,
-      "peer": "A",
-      "sub_protocol": "test",
+      "peer": "B",
+      "sub_protocol": "splice",
       "msg_type": "user_disconnect",
-      "fields": {},
-      "expected_post_state": {"disconnected": true}
+      "expected_post_state": {
+        "disconnected": true
+      }
     },
     {
       "index": 8,
-      "peer": "B",
-      "sub_protocol": "test",
+      "peer": "A",
+      "sub_protocol": "splice",
       "msg_type": "user_disconnect",
-      "fields": {},
-      "expected_post_state": {"disconnected": true}
+      "expected_post_state": {
+        "disconnected": true
+      }
     },
     {
       "index": 9,
       "peer": "A",
-      "sub_protocol": "test",
-      "msg_type": "user_reconnect",
-      "fields": {},
-      "expected_post_state": {"disconnected": false}
+      "sub_protocol": "splice",
+      "msg_type": "channel_reestablish",
+      "fields": {
+        "channel_id": "1",
+        "next_funding_txid": "2"
+      }
     },
     {
       "index": 10,
       "peer": "B",
-      "sub_protocol": "test",
-      "msg_type": "user_reconnect",
-      "fields": {},
-      "expected_post_state": {"disconnected": false}
+      "sub_protocol": "splice",
+      "msg_type": "channel_reestablish",
+      "fields": {
+        "channel_id": "1",
+        "next_funding_txid": "2"
+      }
     },
     {
       "index": 11,
       "peer": "B",
       "sub_protocol": "splice",
       "msg_type": "tx_signatures",
-      "fields": {"channel_id": "1", "txid": "2", "has_shared_input_signature": false},
-      "expected_post_state": {},
-      "spec_citation": "02-peer-protocol.md:3517-3526"
+      "fields": {
+        "channel_id": "1",
+        "has_shared_input_signature": false,
+        "txid": "2"
+      },
+      "expected_post_state": {
+        "splice_state": "AwaitingConfirmation"
+      }
     },
     {
       "index": 12,
       "peer": "A",
       "sub_protocol": "splice",
       "msg_type": "tx_signatures",
-      "fields": {"channel_id": "1", "txid": "2", "has_shared_input_signature": true},
-      "expected_post_state": {}
+      "fields": {
+        "channel_id": "1",
+        "has_shared_input_signature": true,
+        "txid": "2"
+      },
+      "expected_post_state": {
+        "splice_state": "AwaitingConfirmation"
+      }
     },
     {
       "index": 13,
       "peer": "A",
       "sub_protocol": "splice",
       "msg_type": "splice_locked",
-      "fields": {"channel_id": "1", "splice_txid": "2"},
-      "expected_post_state": {}
+      "fields": {
+        "channel_id": "1",
+        "splice_txid": "2"
+      }
     },
     {
       "index": 14,
       "peer": "B",
       "sub_protocol": "splice",
       "msg_type": "splice_locked",
-      "fields": {"channel_id": "1", "splice_txid": "2"},
-      "expected_post_state": {"locked_funding_txid": "2"}
+      "fields": {
+        "channel_id": "1",
+        "splice_txid": "2"
+      }
     }
   ]
 }

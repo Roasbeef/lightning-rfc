@@ -30,24 +30,35 @@ Each `Mismatch` includes the trace event index, peer, field that
 diverged, expected vs observed value, and the BOLT citation the event
 exercises.
 
-## Canonical traces
+## Canonical traces (auto-generated from the model)
 
 Under `../traces/`:
 
 - `splice_in_happy.json` — Phase 2 reference flow.
 - `disconnect_mid_splice.json` — Phase 4 reconnect flow.
 
-Each is hand-authored from `models/SPEC_SURVEY.md` and the
-`bolt02/splicing-test.md` scenarios. Future iterations will have the P
-model auto-emit these via a logger spec (see `pobserve.go`).
+These are **generated from the P model**, not hand-authored. The
+`TraceObserver` spec machine in `../src/observer.p` records every
+protocol step the machines announce via `eWireTrace` and `print`s a
+`PTRACE|...` marker line. `../scripts/generate.sh` runs each `tcGen*`
+test case under `p check --schedules 1 --verbose`, scrapes those
+markers, and feeds them to `cmd/gentrace`, which assembles the JSON
+trace matching the schema in `trace.go`.
+
+Because the traces are model-derived, a spec/model change regenerates
+them and any drift is caught by `go test ./...` (the replay tests run
+against the regenerated files).
 
 ## How to add a new trace
 
-1. Write a P test case that exercises the scenario (under
-   `models/test/*.p`).
-2. Run `p check ... --testcase tcX` and confirm Spec_* monitors pass.
-3. Translate the schedule into a JSON file under `traces/`.
-4. Add a `TestReplayX` to `replay_test.go`.
+1. Write a P test driver that exercises the scenario
+   (`models/test/*.p`) and a `tcGen<Name>` test that attaches
+   `TraceObserver`.
+2. Add `emitTrace(...)` calls at the new wire-send points (or rely on
+   existing ones).
+3. Add a `gen tcGen<Name> <scenario>` line to `scripts/generate.sh`.
+4. Run `./scripts/generate.sh` to emit `traces/<scenario>.json`.
+5. Add a `TestReplay<Name>` to `replay_test.go`.
 
 ## Implementation contract notes
 

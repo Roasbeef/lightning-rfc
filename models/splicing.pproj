@@ -7,6 +7,7 @@
     <PFile>./src/blockchain.p</PFile>
     <PFile>./src/splice_coordinator.p</PFile>
     <PFile>./src/monitors.p</PFile>
+    <PFile>./src/observer.p</PFile>
     <PFile>./test/quiescence_test.p</PFile>
     <PFile>./test/splice_test.p</PFile>
   </InputFiles>

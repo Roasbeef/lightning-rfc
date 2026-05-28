@@ -106,6 +106,8 @@ machine QuiescencePeer {
       sentStfu = true;
       iSentInitiator = 1;
       announce eStfuSent, (peer = pid, initiator = 1);
+      announce eWireTrace, (peer = pid, sub = SpQuiescence, msg = "stfu",
+        txid = 0, amount = 1, feerate = 0, postState = "Quiescing");
       send peerRef, eRecvStfu, (channel_id = 0, initiator = 1);
       goto Quiescing;
     }
@@ -123,6 +125,8 @@ machine QuiescencePeer {
       sentStfu = true;
       iSentInitiator = 0;
       announce eStfuSent, (peer = pid, initiator = 0);
+      announce eWireTrace, (peer = pid, sub = SpQuiescence, msg = "stfu",
+        txid = 0, amount = 0, feerate = 0, postState = "Quiescent");
       send peerRef, eRecvStfu, (channel_id = 0, initiator = 0);
       announce eQuiescentReached, (peer = pid,);
       send coordinator, eQuiescenceAchievedAt,
