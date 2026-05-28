@@ -1,0 +1,7 @@
+<Project>
+  <ProjectName>SplicingInfra</ProjectName>
+  <InputFiles>
+    <PFile>./src/types.p</PFile>
+  </InputFiles>
+  <OutputDir>./PGenerated</OutputDir>
+</Project>

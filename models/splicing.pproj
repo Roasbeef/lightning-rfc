@@ -1,0 +1,14 @@
+<Project>
+  <ProjectName>Splicing</ProjectName>
+  <InputFiles>
+    <PFile>./src/types.p</PFile>
+    <PFile>./src/events.p</PFile>
+    <PFile>./src/quiescence.p</PFile>
+    <PFile>./src/blockchain.p</PFile>
+    <PFile>./src/splice_coordinator.p</PFile>
+    <PFile>./src/monitors.p</PFile>
+    <PFile>./test/quiescence_test.p</PFile>
+    <PFile>./test/splice_test.p</PFile>
+  </InputFiles>
+  <OutputDir>./PGenerated</OutputDir>
+</Project>

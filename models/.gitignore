@@ -1,0 +1,8 @@
+# P-generated artifacts.
+PGenerated/
+PCheckerOutput/
+*.dll
+*.pdb
+
+# Local checker bin caches.
+.coyote/
