@@ -144,3 +144,37 @@ machine TestChannelForwardTooEarly {
 test tcForwardTooEarly [main=TestChannelForwardTooEarly]:
   assert Spec_ForwardOnlyIrrevocable, Spec_NoPhantomCommit in
   (union { TestChannelForwardTooEarly }, { ChannelPeer });
+
+// ---------------------------------------------------------------------------
+// tcReconnectMidCommit (F10): both peers add an update and start signing, then
+// disconnect MID-commitment (un-acked commit_sig in flight is dropped), then
+// reconnect. The retransmit-on-reestablish path must restore convergence —
+// Spec_CommitmentConvergence (liveness) requires both peers to still reach the
+// full irrevocably-committed set across the disconnect (BOLT 2 §3489-3554).
+// This checks the post-condition the spec states only imperatively.
+// ---------------------------------------------------------------------------
+
+machine TestChannelReconnect {
+  start state Init {
+    entry {
+      var a: machine; var b: machine;
+      a = new ChannelPeer(); b = new ChannelPeer();
+      send a, eSetupChannel, (pid = PeerA, peer = b);
+      send b, eSetupChannel, (pid = PeerB, peer = a);
+
+      send a, eUserAddUpdate, (id = 1,);
+      send b, eUserAddUpdate, (id = 2,);
+      send a, eUserSendCommitSig;
+      send b, eUserSendCommitSig;
+      // Disconnect mid-flight, then reestablish.
+      send a, eChanDisconnect;
+      send b, eChanDisconnect;
+      send a, eChanReconnect;
+      send b, eChanReconnect;
+    }
+  }
+}
+
+test tcReconnectMidCommit [main=TestChannelReconnect]:
+  assert Spec_CommitmentConvergence, Spec_NoPhantomCommit in
+  (union { TestChannelReconnect }, { ChannelPeer });

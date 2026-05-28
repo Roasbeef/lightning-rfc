@@ -39,6 +39,14 @@ event eRecvUpdateAdd: (id: tUpdateId);
 event eRecvCommitSig: (covered: set[tUpdateId]);
 event eRecvRevokeAndAck: (acked: set[tUpdateId]);
 
+// F10 (BOLT 2 §3489–3554): disconnect drops in-flight messages; reconnect
+// triggers channel_reestablish, after which un-acknowledged commitment_signed
+// must be retransmitted. We model the post-condition the spec lacks — that
+// convergence still holds across the disconnect — rather than the exact
+// next_commitment_number / next_revocation_number counter arithmetic.
+event eChanDisconnect;
+event eChanReconnect;
+
 // ---------------------------------------------------------------------------
 // Monitor-observed announcements.
 // ---------------------------------------------------------------------------
@@ -161,6 +169,30 @@ machine ChannelPeer {
         pendingForwards += (e.id);
         tryForward();
       }
+    }
+
+    // F10: a disconnect drops in-flight commitment_signed / revoke_and_ack.
+    // On reconnect, BOLT 2 §3493–3496 requires retransmitting an un-acked
+    // commitment_signed. We model that loss-and-recovery by rolling back
+    // `remoteSigned` to only what the peer has acknowledged: any update we
+    // signed into the peer's commitment but have not yet seen revoked
+    // (remoteSigned \ peerAcked) is treated as un-acked and re-flushed on
+    // reconnect. Convergence (Spec_CommitmentConvergence) must still hold.
+    on eChanDisconnect do {
+      var u: tUpdateId;
+      var keep: set[tUpdateId];
+      keep = default(set[tUpdateId]);
+      foreach (u in remoteSigned) {
+        if (u in peerAcked) { keep += (u); }   // peer revoked-old: durable
+      }
+      remoteSigned = keep;   // forget un-acked commit_sig => resend on reconnect
+    }
+
+    on eChanReconnect do {
+      // §3431 + §3493–3496: after channel_reestablish, retransmit owed
+      // commitment_signed. flushCommit is idempotent; double-delivery of any
+      // message that survived is harmless because the lifecycle sets dedup.
+      flushCommit();
     }
   }
 

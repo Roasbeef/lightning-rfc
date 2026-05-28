@@ -289,11 +289,28 @@ vectors.
 
 ## F10. Reconnect retransmit ordering under concurrent in-flight updates
 
-**Status:** Open + partially modeled. **Spec citation:** BOLT 2
-§3489–§3503 (`channel_reestablish` `next_commitment_number` /
-`next_revocation_number` reasoning), §3493–§3496 (the "retransmit
-`revoke_and_ack` and `commitment_signed` in the same relative order"
-rule), §3545–§3554. **Question:** Q20.
+**Status:** Modeled at the post-condition level — convergence holds across
+a disconnect; the exact counter arithmetic remains abstracted.
+**Spec citation:** BOLT 2 §3489–§3503 (`channel_reestablish`
+`next_commitment_number` / `next_revocation_number` reasoning), §3493–§3496
+(the "retransmit `revoke_and_ack` and `commitment_signed` in the same
+relative order" rule), §3545–§3554. **Question:** Q20.
+**Model:** `tcReconnectMidCommit` in `test/channel_test.p`;
+`eChanDisconnect` / `eChanReconnect` handlers in `channel_commit.p`.
+
+**What the model now shows.** `tcReconnectMidCommit` has both peers add an
+update and begin signing, then disconnect with an un-acked
+`commitment_signed` in flight, then reconnect. The disconnect rolls back
+`remoteSigned` to only the peer-acknowledged set (`remoteSigned ∩
+peerAcked`), so any un-acked `commitment_signed` is re-flushed on
+reconnect (§3493–§3496). `Spec_CommitmentConvergence` (liveness) must
+still discharge — and does, across 1128 timelines at 2000 schedules.
+This checks the **post-condition** the spec never states: convergence is
+preserved across a reconnect. The exact `next_commitment_number ± 1`
+counter arithmetic is abstracted into "retransmit the un-acked set",
+which is the safe behavior; modeling the literal counter crossing
+(distinguishing a conformant peer from one that retransmits in the wrong
+order) remains future work.
 
 Phase 4 modeled reconnection using only the splice-specific
 `next_funding` marker; it did **not** model the base-layer

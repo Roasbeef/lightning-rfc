@@ -75,6 +75,7 @@ Base commitment FSM (`channel.pproj`, the F9/F10 follow-up):
 | tcConcurrentCommitSig           | 3000      | 3000      | concurrent both-side commit|
 | tcSecondRound                   | 3000      | 3000      | pipelined second round     |
 | tcForwardSafe                   | 3000      | 3000      | conformant forward (green) |
+| tcReconnectMidCommit            | 2000      | 3000      | F10: converge across reconnect (~1128 timelines) |
 | tcForwardTooEarly               | 500       | 2000      | NEGATIVE — must find a bug  |
 
 `tcForwardTooEarly` is a counterexample test: it MUST report a bug

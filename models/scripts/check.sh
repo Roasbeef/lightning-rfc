@@ -59,6 +59,7 @@ run "$CHANNEL_DLL" tcOneDirectional      3000
 run "$CHANNEL_DLL" tcConcurrentCommitSig 3000
 run "$CHANNEL_DLL" tcSecondRound         3000
 run "$CHANNEL_DLL" tcForwardSafe         3000
+run "$CHANNEL_DLL" tcReconnectMidCommit  3000
 
 # Negative / counterexample test: tcForwardTooEarly MUST find the fund-loss
 # safety violation (forwarding before irrevocable commitment). We invert the
